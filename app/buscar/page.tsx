@@ -70,7 +70,7 @@ export default function BuscarCartas() {
   const [setText, setSetText] = useState('');
   const [selectedSet, setSelectedSet] = useState<SearchSet | null>(null);
   const [setSuggestions, setSetSuggestions] = useState<SearchSet[]>([]);
-  const [setLoading, setSetLoading] = useState(false);
+  const [loadingSets, setLoadingSets] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [cards, setCards] = useState<SearchCard[]>([]);
@@ -79,19 +79,22 @@ export default function BuscarCartas() {
   const [searchedPokemon, setSearchedPokemon] = useState('');
 
   useEffect(() => {
-    if (!showSuggestions || selectedSet) return;
+    if (!showSuggestions || selectedSet) {
+      return;
+    }
 
     const query = setText.trim();
 
     if (query.length < 2) {
       setSetSuggestions([]);
+      setLoadingSets(false);
       return;
     }
 
     const controller = new AbortController();
 
     const timer = setTimeout(async () => {
-      setSetLoading(true);
+      setLoadingSets(true);
 
       try {
         const response = await fetch(
@@ -105,16 +108,18 @@ export default function BuscarCartas() {
 
         const data = await response.json();
 
-        setSetSuggestions(
-          Array.isArray(data.sets) ? data.sets : []
-        );
-      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSetSuggestions(
+            Array.isArray(data.sets) ? data.sets : []
+          );
+        }
+      } catch {
         if (!controller.signal.aborted) {
           setSetSuggestions([]);
         }
       } finally {
         if (!controller.signal.aborted) {
-          setSetLoading(false);
+          setLoadingSets(false);
         }
       }
     }, 300);
@@ -130,6 +135,15 @@ export default function BuscarCartas() {
     setSetText(set.name);
     setShowSuggestions(false);
     setSetSuggestions([]);
+    setLoadingSets(false);
+  }
+
+  function clearSet() {
+    setSelectedSet(null);
+    setSetText('');
+    setSetSuggestions([]);
+    setShowSuggestions(false);
+    setLoadingSets(false);
   }
 
   async function buscar() {
@@ -228,11 +242,15 @@ export default function BuscarCartas() {
       setCards(foundCards);
 
       if (foundCards.length === 0) {
-        setMessage('Nenhuma carta encontrada para esses filtros.');
+        setMessage(
+          'Nenhuma carta encontrada para esses filtros.'
+        );
       }
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : 'Erro na pesquisa.'
+        error instanceof Error
+          ? error.message
+          : 'Erro na pesquisa.'
       );
     } finally {
       setLoading(false);
@@ -310,11 +328,20 @@ export default function BuscarCartas() {
               onChange={event => {
                 setSetText(event.target.value);
                 setSelectedSet(null);
+                setSetSuggestions([]);
                 setShowSuggestions(true);
               }}
               onFocus={() => {
                 if (!selectedSet) {
                   setShowSuggestions(true);
+                }
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  setShowSuggestions(false);
+                }
+                if (event.key === 'Enter' && selectedSet) {
+                  buscar();
                 }
               }}
               placeholder="Ex.: 30 Anos"
@@ -335,18 +362,15 @@ export default function BuscarCartas() {
                 {' '}
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedSet(null);
-                    setSetText('');
-                    setSetSuggestions([]);
-                  }}
+                  onClick={clearSet}
                 >
                   Limpar
                 </button>
               </p>
             )}
 
-            {showSuggestions && !selectedSet && (
+            {showSuggestions && !selectedSet &&
+              setText.trim().length >= 2 && (
               <div
                 style={{
                   position: 'absolute',
@@ -362,13 +386,20 @@ export default function BuscarCartas() {
                   marginTop: 4
                 }}
               >
-                {setLoading && (
+                {loadingSets && (
                   <p style={{ padding: 12 }}>
                     Buscando coleções...
                   </p>
                 )}
 
-                {!setLoading &&
+                {!loadingSets &&
+                  setSuggestions.length === 0 && (
+                    <p style={{ padding: 12 }}>
+                      Nenhuma sugestão encontrada.
+                    </p>
+                  )}
+
+                {!loadingSets &&
                   setSuggestions.map(set => (
                     <button
                       key={`${set.language}:${set.id}`}
@@ -407,7 +438,11 @@ export default function BuscarCartas() {
           </div>
         </div>
 
-        <button onClick={buscar} disabled={loading}>
+        <button
+          type="button"
+          onClick={buscar}
+          disabled={loading}
+        >
           {loading ? 'Buscando...' : 'Pesquisar cartas'}
         </button>
       </section>
@@ -472,4 +507,3 @@ export default function BuscarCartas() {
     </main>
   );
 }
-
