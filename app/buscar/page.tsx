@@ -55,7 +55,7 @@ export default function BuscarCartas() {
 
   async function buscar() {
     const name = search.trim();
-    const dex = dexNumber.trim();
+    const dex = dexNumber.trim().replace(/^0+(?=\d)/, '');
 
     if (!name && !dex) {
       setMessage('Informe o nome ou número da Pokédex.');
@@ -69,11 +69,12 @@ export default function BuscarCartas() {
 
       if (
         !/^\d+$/.test(dex) ||
+        !Number.isInteger(number) ||
         number < 1 ||
         number > firstGeneration.length
       ) {
         setMessage(
-          'Por enquanto, o filtro aceita números de 001 a 151.'
+          'Por enquanto, o filtro aceita números de 1 a 151.'
         );
         return;
       }
@@ -168,7 +169,7 @@ export default function BuscarCartas() {
               onKeyDown={event => {
                 if (event.key === 'Enter') buscar();
               }}
-              placeholder="Ex.: 094"
+              placeholder="Ex.: 94 ou 094"
               inputMode="numeric"
               style={{
                 display: 'block',
@@ -238,6 +239,10 @@ export default function BuscarCartas() {
           </article>
         ))}
       </section>
+    </main>
+  );
+}
+
     </main>
   );
 }
