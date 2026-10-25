@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type SearchCard = {
   id: string;
@@ -9,6 +9,13 @@ type SearchCard = {
   name: string;
   image?: string;
   language?: string;
+};
+
+type SearchSet = {
+  id: string;
+  name: string;
+  language: string;
+  languageName: string;
 };
 
 const firstGeneration = [
@@ -45,20 +52,101 @@ const firstGeneration = [
   'Mew'
 ];
 
+const languageLabels: Record<string, string> = {
+  pt: 'Português',
+  en: 'Inglês',
+  ja: 'Japonês',
+  'zh-tw': 'Chinês tradicional'
+};
+
+function cardBelongsToSet(cardId: string, setId: string) {
+  return cardId.startsWith(`${setId}-`);
+}
+
 export default function BuscarCartas() {
   const [search, setSearch] = useState('');
   const [dexNumber, setDexNumber] = useState('');
+
+  const [setText, setSetText] = useState('');
+  const [selectedSet, setSelectedSet] = useState<SearchSet | null>(null);
+  const [setSuggestions, setSetSuggestions] = useState<SearchSet[]>([]);
+  const [setLoading, setSetLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   const [cards, setCards] = useState<SearchCard[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [searchedPokemon, setSearchedPokemon] = useState('');
 
+  useEffect(() => {
+    if (!showSuggestions || selectedSet) return;
+
+    const query = setText.trim();
+
+    if (query.length < 2) {
+      setSetSuggestions([]);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      setSetLoading(true);
+
+      try {
+        const response = await fetch(
+          `/api/sets/search?q=${encodeURIComponent(query)}`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          throw new Error('Erro ao consultar coleções.');
+        }
+
+        const data = await response.json();
+
+        setSetSuggestions(
+          Array.isArray(data.sets) ? data.sets : []
+        );
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSetSuggestions([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSetLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [setText, selectedSet, showSuggestions]);
+
+  function selectSet(set: SearchSet) {
+    setSelectedSet(set);
+    setSetText(set.name);
+    setShowSuggestions(false);
+    setSetSuggestions([]);
+  }
+
   async function buscar() {
     const name = search.trim();
     const dex = dexNumber.trim().replace(/^0+(?=\d)/, '');
 
-    if (!name && !dex) {
-      setMessage('Informe o nome ou número da Pokédex.');
+    if (setText.trim() && !selectedSet) {
+      setMessage(
+        'Selecione uma coleção nas sugestões antes de pesquisar.'
+      );
+      return;
+    }
+
+    if (!name && !dex && !selectedSet) {
+      setMessage(
+        'Informe o nome, número da Pokédex ou uma coleção.'
+      );
       return;
     }
 
@@ -82,7 +170,7 @@ export default function BuscarCartas() {
       pokemonName = firstGeneration[number - 1];
     }
 
-    if (pokemonName.length < 2) {
+    if (pokemonName && pokemonName.length < 2) {
       setMessage('Digite pelo menos 2 caracteres.');
       return;
     }
@@ -90,27 +178,57 @@ export default function BuscarCartas() {
     setLoading(true);
     setMessage('');
     setCards([]);
-    setSearchedPokemon(pokemonName);
+    setSearchedPokemon(
+      pokemonName || selectedSet?.name || ''
+    );
 
     try {
-      const response = await fetch(
-        `/api/cards/search?q=${encodeURIComponent(pokemonName)}`
-      );
+      let foundCards: SearchCard[] = [];
 
-      const data = await response.json();
+      if (pokemonName) {
+        const response = await fetch(
+          `/api/cards/search?q=${encodeURIComponent(pokemonName)}`
+        );
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Erro na pesquisa.');
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Erro na pesquisa.');
+        }
+
+        foundCards = Array.isArray(data.cards)
+          ? data.cards
+          : [];
+      } else if (selectedSet) {
+        const response = await fetch(
+          `https://api.tcgdex.net/v2/${selectedSet.language}/sets/${encodeURIComponent(selectedSet.id)}`
+        );
+
+        if (!response.ok) {
+          throw new Error('Não foi possível carregar a coleção.');
+        }
+
+        const data = await response.json();
+
+        foundCards = Array.isArray(data.cards)
+          ? data.cards.map((card: SearchCard) => ({
+              ...card,
+              language: selectedSet.language
+            }))
+          : [];
       }
 
-      const foundCards: SearchCard[] = Array.isArray(data.cards)
-        ? data.cards
-        : [];
+      if (selectedSet) {
+        foundCards = foundCards.filter(card =>
+          card.language === selectedSet.language &&
+          cardBelongsToSet(card.id, selectedSet.id)
+        );
+      }
 
       setCards(foundCards);
 
       if (foundCards.length === 0) {
-        setMessage('Nenhuma carta encontrada.');
+        setMessage('Nenhuma carta encontrada para esses filtros.');
       }
     } catch (error) {
       setMessage(
@@ -126,7 +244,7 @@ export default function BuscarCartas() {
       <h1>Buscar cartas Pokémon</h1>
 
       <p>
-        Pesquise pelo nome ou número da Pokédex Nacional.
+        Pesquise pelo nome, número da Pokédex ou coleção.
       </p>
 
       <section
@@ -180,6 +298,113 @@ export default function BuscarCartas() {
               }}
             />
           </label>
+
+          <div style={{ position: 'relative' }}>
+            <label htmlFor="set-search">
+              <strong>Coleção</strong>
+            </label>
+
+            <input
+              id="set-search"
+              value={setText}
+              onChange={event => {
+                setSetText(event.target.value);
+                setSelectedSet(null);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => {
+                if (!selectedSet) {
+                  setShowSuggestions(true);
+                }
+              }}
+              placeholder="Ex.: 30 Anos"
+              autoComplete="off"
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: 12,
+                marginTop: 8,
+                boxSizing: 'border-box'
+              }}
+            />
+
+            {selectedSet && (
+              <p style={{ fontSize: 12, marginTop: 6 }}>
+                Selecionada: {selectedSet.name} —{' '}
+                {selectedSet.languageName} ({selectedSet.language})
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSet(null);
+                    setSetText('');
+                    setSetSuggestions([]);
+                  }}
+                >
+                  Limpar
+                </button>
+              </p>
+            )}
+
+            {showSuggestions && !selectedSet && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 20,
+                  maxHeight: 280,
+                  overflowY: 'auto',
+                  background: '#14213d',
+                  border: '1px solid #64748b',
+                  borderRadius: 8,
+                  marginTop: 4
+                }}
+              >
+                {setLoading && (
+                  <p style={{ padding: 12 }}>
+                    Buscando coleções...
+                  </p>
+                )}
+
+                {!setLoading &&
+                  setSuggestions.map(set => (
+                    <button
+                      key={`${set.language}:${set.id}`}
+                      type="button"
+                      onClick={() => selectSet(set)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: 12,
+                        background: 'transparent',
+                        color: 'white',
+                        border: 0,
+                        borderBottom: '1px solid #334155',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <strong>{set.name}</strong>
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: 12,
+                          opacity: 0.8,
+                          marginTop: 4
+                        }}
+                      >
+                        {set.languageName ||
+                          languageLabels[set.language] ||
+                          set.language}
+                        {' '}— {set.id}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <button onClick={buscar} disabled={loading}>
@@ -234,7 +459,12 @@ export default function BuscarCartas() {
 
             <h3>{card.name}</h3>
             <p>Carta: {card.localId}</p>
-            <p>Idioma: {card.language || 'Não informado'}</p>
+            <p>
+              Idioma:{' '}
+              {languageLabels[card.language || ''] ||
+                card.language ||
+                'Não informado'}
+            </p>
             <p style={{ fontSize: 12 }}>{card.id}</p>
           </article>
         ))}
@@ -242,3 +472,4 @@ export default function BuscarCartas() {
     </main>
   );
 }
+
